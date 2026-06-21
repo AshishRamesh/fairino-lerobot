@@ -23,13 +23,31 @@ class FairinoFR5Config(RobotConfig):
     mock: bool = False                 # use the in-process MockRPC (no hardware)
 
     # --- control loop ---
-    fps: int = 30                      # control rate; ServoJ cmdT is derived as 1/fps
+    fps: int = 30                      # control rate; servo cmdT = min(1/fps, servo_cmd_t_ceiling_s)
     servo_cmd_type: int = 0            # 0 = XML-RPC ServoJ, 1 = UDP passthrough (faster)
-    servo_filter_t: float = 0.0        # ServoJ filterT low-pass; raise for noisy VLA chunks
+    servo_filter_t: float = 0.0        # ServoJ/ServoCart filterT low-pass; raise for noisy chunks
+    # Controller interpolation period ceiling. The FR5 servo firmware expects cmdT in
+    # ~[0.001, 0.016] s; 1/fps at 30 Hz (0.033 s) is out of range, so cmdT is clamped to
+    # this. For smooth motion run fps >= 60 (so 1/fps falls inside the band).
+    servo_cmd_t_ceiling_s: float = 0.016
+    max_consecutive_servo_errors: int = 5  # abort after this many back-to-back servo rejects
     # Read joint/TCP state from the SDK's real-time UDP struct (robot_state_pkg.*) instead
     # of XML-RPC getters. Faster, but only correct if that struct is live-updated on your
     # controller/firmware — leave False until verified, then enable to cut read latency.
     use_fast_state_read: bool = False
+
+    # --- action mode ---
+    # "joint":    action = joint{1..6}.pos (degrees) -> ServoJ. Default; used by policies.
+    # "ee_delta": action = delta_x/delta_y/delta_z (matches the LeRobot gamepad teleop)
+    #             -> ServoCart incremental Cartesian. The FR5 controller solves IK onboard
+    #             (no URDF/solver needed). Use this for gamepad/Xbox teleoperation.
+    action_mode: str = "joint"
+    ee_frame: str = "base"             # "base" (ServoCart mode 1) or "tool" (ServoCart mode 2)
+    # Conservative defaults for first bring-up: 5 mm/unit => ~150 mm/s at full stick @30Hz,
+    # capped at 10 mm/tick (~300 mm/s). Raise once direction/scale are verified on hardware.
+    ee_step_scale: float = 5.0         # mm of Cartesian motion per unit gamepad delta (delta in [-1,1])
+    max_ee_step_mm: float = 10.0       # hard per-tick Cartesian translation clamp (safety backstop)
+    ee_delta_sign: tuple[float, float, float] = (1.0, 1.0, 1.0)  # flip an axis (set -1) if inverted
 
     # --- safety (degrees) ---
     max_joint_step_deg: float = 4.0    # hard per-tick delta clip (~120 deg/s @ 30 Hz)
@@ -60,3 +78,12 @@ class FairinoFR5Config(RobotConfig):
 
     # --- cameras --- (empty by default; pass via --robot.cameras at runtime)
     cameras: dict[str, CameraConfig] = field(default_factory=dict)
+
+    def __post_init__(self):
+        super().__post_init__()  # validates each camera has width/height/fps
+        if self.action_mode not in ("joint", "ee_delta"):
+            raise ValueError(
+                f"action_mode must be 'joint' or 'ee_delta', got {self.action_mode!r}"
+            )
+        if self.ee_frame not in ("base", "tool"):
+            raise ValueError(f"ee_frame must be 'base' or 'tool', got {self.ee_frame!r}")

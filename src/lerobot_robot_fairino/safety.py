@@ -81,14 +81,14 @@ def clip_joint_step(
     return out
 
 
-def check_safety(robot, mock: bool = False) -> None:
+def check_safety(robot) -> None:
     """Gate before sending motion: raise if the controller reports a safety fault.
 
     Uses ``GetSafetyCode()`` when available; a non-zero code aborts the tick so the
     caller's ``finally`` can disconnect gracefully rather than driving a faulted arm.
+    (The MockRPC returns 0 by default, so this is a no-op in mock unless a fault is
+    injected for testing.)
     """
-    if mock:
-        return
     get_code = getattr(robot, "GetSafetyCode", None)
     if get_code is None:
         return

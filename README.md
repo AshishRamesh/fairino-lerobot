@@ -83,6 +83,30 @@ Keep the physical e-stop in reach. The driver enforces a per-tick joint-delta cl
 (`max_joint_step_deg`, default 4°) and software joint limits as backstops; the controller
 enforces the true hard limits.
 
+## Xbox / gamepad teleoperation (EE-delta mode)
+
+Drive the arm live with a gamepad — the FR5 solves Cartesian→joint onboard (no URDF/IK).
+
+1. **Pair the controller** (Bluetooth via `bluetoothctl`, or the Xbox wireless dongle via the
+   `xone` driver) and confirm Linux sees it: `ls /dev/input/js*` then `jstest /dev/input/js0`.
+2. **Install the gamepad deps:** `pip install "pygame>=2.5.1,<2.7.0" "hidapi>=0.14.0,<0.15.0"`.
+3. **Run** (LeRobot's built-in `gamepad` teleop emits `delta_x/y/z`; `ee_delta` maps them to `ServoCart`):
+
+```bash
+lerobot-teleoperate \
+  --robot.type=fairino_fr5 --robot.action_mode=ee_delta --robot.ip=192.168.58.2 --robot.fps=30 \
+  --teleop.type=gamepad --teleop.use_gripper=false
+```
+
+Left stick → X/Y, right stick → Z. **First-run safety:** defaults are conservative
+(`ee_step_scale=5`, `max_ee_step_mm=10` ≈ ≤300 mm/s) — **jog each axis at low scale first** and
+confirm directions (use `ee_delta_sign` to flip an inverted axis), keep the e-stop in reach, then
+raise the scale. For smoother motion run `--robot.fps=60` (servo `cmdT` is clamped to
+`servo_cmd_t_ceiling_s=0.016`, so at 30 Hz motion is interpolated in ≤16 ms bursts). A genuine
+controller safety fault aborts the loop; benign singularity/limit rejections are skipped (and abort
+after `max_consecutive_servo_errors`). The gamepad's trigger gripper is ignored unless
+`--robot.use_gripper=true`.
+
 ## Inference (after you have a trained policy)
 
 ```bash
@@ -111,6 +135,12 @@ lerobot-rollout --strategy.type=base --inference.type=rtc --inference.rtc.execut
 | `servo_cmd_type` | `0` | `0` XML-RPC, `1` UDP passthrough (faster) |
 | `servo_filter_t` | `0.0` | ServoJ low-pass; raise for noisy VLA action chunks |
 | `use_fast_state_read` | `False` | read `robot_state_pkg.*`; enable once verified live |
+| `action_mode` | `joint` | `joint` (ServoJ) or `ee_delta` (ServoCart, gamepad) |
+| `ee_step_scale` | `5.0` | mm of Cartesian motion per unit gamepad delta |
+| `max_ee_step_mm` | `10.0` | per-tick Cartesian translation clamp (safety) |
+| `ee_frame` | `base` | `base` (ServoCart mode 1) or `tool` (mode 2) |
+| `ee_delta_sign` | `(1,1,1)` | per-axis sign flip if a direction is inverted |
+| `servo_cmd_t_ceiling_s` | `0.016` | servo interpolation period ceiling |
 | `max_joint_step_deg` | `4.0` | per-tick joint-delta clip (safety) |
 | `joint_limits_deg` | `None` | `None` → FR5 factory limits (see `safety.py`) |
 | `include_tcp_pose` | `False` | add `tcp_*.pos` to observations |
@@ -126,8 +156,10 @@ normalizes at training time from dataset statistics; the driver never normalizes
 ## Roadmap (deferred)
 
 1. `lerobot_teleoperator_fairino` — drag-teach (`DragTeachSwitch`) teleop so `lerobot-record`
-   can collect demos on the single arm. Optionally a gamepad/`ServoCart` EE-delta mode.
+   can collect demos kinesthetically on the single arm. (Gamepad EE-delta teleop is already
+   supported — see above — but is translation-only, 3-DoF.)
 2. Gripper bring-up once the model is known (`SetGripperConfig` company/device/type).
 3. Camera wiring (OpenCV / RealSense) for the actual rig.
+4. Full 6-DoF gamepad control (map the right stick to `drx/dry/drz` rotation increments).
 
 Then the full loop is: record → `lerobot-train --policy.type=act|smolvla` → `lerobot-rollout`.

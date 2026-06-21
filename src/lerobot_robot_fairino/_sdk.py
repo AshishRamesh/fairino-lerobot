@@ -99,6 +99,13 @@ class MockRPC:
     def __init__(self, ip: str = "192.168.58.2"):
         self.ip_address = ip
         self.robot_state_pkg = _MockStatePkg()
+        # Test instrumentation / fault injection:
+        self.safety_code = 0           # returned by GetSafetyCode()
+        self.servocart_return_code = 0  # if non-zero, ServoCart rejects without moving
+        self.last_servoj = None         # captured kwargs of the last ServoJ call
+        self.last_servocart = None      # captured kwargs of the last ServoCart call
+        self.move_gripper_calls = 0
+        self.stop_motion_calls = 0
 
     # connection / mode -----------------------------------------------------------------
     def RobotEnable(self, state):  # noqa: N802 (match SDK casing)
@@ -113,13 +120,32 @@ class MockRPC:
     def ServoMoveEnd(self, cmdType=0):  # noqa: N802, N803
         return 0
 
-    def GetSafetyCode(self):  # noqa: N802
+    def StopMotion(self):  # noqa: N802
+        self.stop_motion_calls += 1
         return 0
+
+    def GetSafetyCode(self):  # noqa: N802
+        return self.safety_code
 
     # motion ----------------------------------------------------------------------------
     def ServoJ(self, joint_pos, axisPos, acc=0.0, vel=0.0, cmdT=0.008,  # noqa: N802, N803
                filterT=0.0, gain=0.0, id=0, cmdType=0):
+        self.last_servoj = {"joint_pos": list(joint_pos), "cmdT": cmdT, "vel": vel}
         self.robot_state_pkg.jt_cur_pos = [float(x) for x in joint_pos][:6]
+        return 0
+
+    def ServoCart(self, mode, desc_pos, exaxis, pos_gain=None, acc=0.0,  # noqa: N802, N803
+                  vel=0.0, cmdT=0.008, filterT=0.0, gain=0.0):
+        self.last_servocart = {"mode": mode, "desc_pos": list(desc_pos), "cmdT": cmdT,
+                               "pos_gain": pos_gain}
+        # Like the real SDK, reject (return a code) without moving when "faulted".
+        if self.servocart_return_code != 0:
+            return self.servocart_return_code
+        cur = self.robot_state_pkg.tl_cur_pos
+        if mode == 0:  # absolute (base frame)
+            self.robot_state_pkg.tl_cur_pos = [float(x) for x in desc_pos][:6]
+        else:  # 1/2 = incremental (base/tool)
+            self.robot_state_pkg.tl_cur_pos = [c + float(d) for c, d in zip(cur, desc_pos)]
         return 0
 
     # state reads -----------------------------------------------------------------------
@@ -144,6 +170,7 @@ class MockRPC:
 
     def MoveGripper(self, index, pos, vel, force, maxtime, block, type,  # noqa: N802, A002
                     rotNum, rotVel, rotTorque):  # noqa: N803
+        self.move_gripper_calls += 1
         self.robot_state_pkg.gripper_position = int(pos)
         return 0
 

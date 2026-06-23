@@ -40,6 +40,7 @@ class FairinoFR5(Robot):
         self.robot = None
         self.cameras = make_cameras_from_configs(config.cameras)
         self._servo_started = False
+        self._enabled = False  # whether RobotEnable(1) was issued (set in configure)
         self._servo_cmd_type = 0  # transport used for ServoMoveStart/End (set in configure)
         self._last_gripper_cmd: int | None = None
         self._ee_reject_count = 0  # consecutive ServoCart rejections
@@ -115,10 +116,24 @@ class FairinoFR5(Robot):
             return
         rpc_cls = self._make_rpc_cls()
         self.robot = rpc_cls(self.config.ip)  # opens XML-RPC (+ UDP state thread)
+        if not self.config.mock and not self.config.require_cnde:
+            # The SDK gates every call behind ``is_connect``, which requires the CNDE
+            # real-time-state stream (port 20005). This driver reads over XML-RPC and
+            # does not use CNDE, so open the gate and verify XML-RPC actually responds.
+            type(self.robot).is_connect = True
+            self._assert_xmlrpc_alive()
         for cam in self.cameras.values():
             cam.connect()
         self.configure()
         logger.info("FairinoFR5 connected at %s", self.config.ip)
+
+    def _assert_xmlrpc_alive(self) -> None:
+        ret = self.robot.GetActualJointPosDegree(1)
+        if not (isinstance(ret, (list, tuple)) and ret[0] == 0):
+            raise ConnectionError(
+                f"FR5 XML-RPC not responding (GetActualJointPosDegree returned {ret!r}). "
+                f"Check the controller IP ({self.config.ip}) and that the arm is reachable."
+            )
 
     def _make_rpc_cls(self):
         if self.config.mock:
@@ -130,6 +145,7 @@ class FairinoFR5(Robot):
     def configure(self) -> None:
         r = self.robot
         _ok(r.RobotEnable(1), "RobotEnable")
+        self._enabled = True
         _ok(r.Mode(0), "Mode(automatic)")  # 0 = automatic mode, required for ServoJ
         if self.config.use_gripper:
             _ok(
@@ -153,7 +169,7 @@ class FairinoFR5(Robot):
                         self.robot.ServoMoveEnd(self._servo_cmd_type)
                     except Exception:  # pragma: no cover - best-effort teardown
                         logger.exception("StopMotion/ServoMoveEnd failed during disconnect")
-                if self.config.disable_on_disconnect:
+                if self.config.disable_on_disconnect and self._enabled:
                     try:
                         self.robot.RobotEnable(0)
                     except Exception:  # pragma: no cover
@@ -161,6 +177,7 @@ class FairinoFR5(Robot):
             finally:
                 self.robot = None
                 self._servo_started = False
+                self._enabled = False
                 self._last_gripper_cmd = None
         for cam in self.cameras.values():
             cam.disconnect()
@@ -182,7 +199,9 @@ class FairinoFR5(Robot):
             obs.update({f"{t}.pos": float(v) for t, v in zip(TCP, tcp)})
 
         if self.config.include_joint_velocity:
-            _err, speeds = self.robot.GetActualJointSpeedsDegree(1)
+            speeds = self._unwrap(
+                self.robot.GetActualJointSpeedsDegree(1), "GetActualJointSpeedsDegree"
+            )
             obs.update({f"joint{i + 1}_vel.pos": float(speeds[i]) for i in range(6)})
 
         for cam_key, cam in self.cameras.items():
@@ -349,16 +368,25 @@ class FairinoFR5(Robot):
             self._last_gripper_cmd = target
 
     # ----------------------------------------------------------------- reads
+    @staticmethod
+    def _unwrap(ret, what: str) -> list[float]:
+        """Validate an SDK getter return of the form ``(0, [..])``.
+
+        SDK getters return ``(0, [values])`` on success but a bare int error code on
+        failure, so unpack defensively and surface a clear error.
+        """
+        if not (isinstance(ret, (list, tuple)) and len(ret) >= 2 and ret[0] == 0):
+            raise ConnectionError(f"{what} failed (returned {ret!r})")
+        return [float(x) for x in ret[1]]
+
     def _read_joints_deg(self) -> list[float]:
         if self.config.use_fast_state_read:
             pkg = self.robot.robot_state_pkg
             return [float(pkg.jt_cur_pos[i]) for i in range(6)]
-        _err, pos = self.robot.GetActualJointPosDegree(1)  # flag 1 = non-blocking
-        return [float(x) for x in pos]
+        return self._unwrap(self.robot.GetActualJointPosDegree(1), "GetActualJointPosDegree")
 
     def _read_tcp(self) -> list[float]:
         if self.config.use_fast_state_read:
             pkg = self.robot.robot_state_pkg
             return [float(pkg.tl_cur_pos[i]) for i in range(6)]
-        _err, pose = self.robot.GetActualTCPPose(1)
-        return [float(x) for x in pose]
+        return self._unwrap(self.robot.GetActualTCPPose(1), "GetActualTCPPose")

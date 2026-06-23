@@ -36,9 +36,22 @@ pip install -e .
 
 The `fairino` SDK is **not on PyPI**. It is **vendored** in this repo
 (`src/lerobot_robot_fairino/_vendor/fairino/`, pure-Python) and added to `sys.path`
-lazily at connect time, so no extra install step is needed. To update it, copy a newer
-`linux/fairino/` from [fairino-python-sdk](https://github.com/FAIR-INNOVATION/fairino-python-sdk)
-over the vendored copy.
+lazily at connect time, so no extra install step is needed.
+
+The vendored copy is pinned to **`v2.2.5_robot_v3.9.5`** (matches FR controller firmware
+**3.9.5**). The SDK must match your controller's firmware — check the firmware version on
+the teach pendant, then if it differs, swap the file for the matching release tag:
+
+```bash
+curl -fSL "https://raw.githubusercontent.com/FAIR-INNOVATION/fairino-python-sdk/<TAG>/linux/fairino/Robot.py" \
+  -o src/lerobot_robot_fairino/_vendor/fairino/Robot.py   # TAG e.g. v2.2.5_robot_v3.9.5
+```
+
+> **CNDE note:** the SDK gates all calls behind `is_connect`, which requires the CNDE
+> real-time-state stream (port 20005). This driver reads over XML-RPC and does **not**
+> need CNDE, so `require_cnde=False` (default) opens that gate after verifying XML-RPC.
+> If CNDE times out on your controller (e.g. only one state client allowed), the driver
+> still works.
 
 ## Verify (no hardware)
 

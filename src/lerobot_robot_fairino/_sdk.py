@@ -106,9 +106,11 @@ class MockRPC:
         self.last_servocart = None      # captured kwargs of the last ServoCart call
         self.move_gripper_calls = 0
         self.stop_motion_calls = 0
+        self.robot_enable_states = []   # history of RobotEnable() args
 
     # connection / mode -----------------------------------------------------------------
     def RobotEnable(self, state):  # noqa: N802 (match SDK casing)
+        self.robot_enable_states.append(int(state))
         return 0
 
     def Mode(self, state):  # noqa: N802

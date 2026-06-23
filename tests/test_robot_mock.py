@@ -66,6 +66,39 @@ def test_get_observation_requires_connection():
         r.get_observation()
 
 
+def test_full_connect_disconnect_enables_then_disables():
+    r = FairinoFR5(FairinoFR5Config(mock=True))
+    r.connect()
+    mock = r.robot
+    r.disconnect()
+    assert 1 in mock.robot_enable_states  # enabled on connect
+    assert 0 in mock.robot_enable_states  # disabled on disconnect
+
+
+def test_disconnect_without_enable_does_not_disable():
+    # Mirrors a read-only session that sets .robot directly and never configures:
+    # disconnect must not RobotEnable(0) something it never enabled.
+    from lerobot_robot_fairino._sdk import MockRPC
+
+    r = FairinoFR5(FairinoFR5Config(mock=True))
+    mock = MockRPC(r.config.ip)
+    r.robot = mock
+    r.disconnect()
+    assert mock.robot_enable_states == []
+
+
+def test_read_raises_on_sdk_error_return():
+    # SDK getters return a bare int on failure; the driver must surface it clearly.
+    r = FairinoFR5(FairinoFR5Config(mock=True))
+    r.connect()
+    try:
+        r.robot.GetActualJointPosDegree = lambda flag=1: -4
+        with pytest.raises(ConnectionError):
+            r.get_observation()
+    finally:
+        r.disconnect()
+
+
 def test_gripper_command_on_change_only():
     r = FairinoFR5(FairinoFR5Config(mock=True, use_gripper=True, gripper_command_epsilon=2.0))
     r.connect()

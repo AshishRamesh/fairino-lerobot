@@ -21,6 +21,10 @@ class FairinoFR5Config(RobotConfig):
     # --- connection ---
     ip: str = "192.168.58.2"           # FR controller default; confirm on your subnet
     mock: bool = False                 # use the in-process MockRPC (no hardware)
+    # The SDK gates all calls behind is_connect, which requires the CNDE state stream
+    # (port 20005). This driver reads over XML-RPC and does not use CNDE, so by default
+    # we don't require it. Set True only if your setup genuinely depends on CNDE.
+    require_cnde: bool = False
 
     # --- control loop ---
     fps: int = 30                      # control rate; servo cmdT = min(1/fps, servo_cmd_t_ceiling_s)

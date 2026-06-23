@@ -29,6 +29,11 @@ TCP = ["tcp_x", "tcp_y", "tcp_z", "tcp_rx", "tcp_ry", "tcp_rz"]
 EE_DELTA_KEYS = ["delta_x", "delta_y", "delta_z"]  # match LeRobot gamepad teleop keys
 NO_EXT_AXES = [0.0, 0.0, 0.0, 0.0]  # FR controllers expect 4 external-axis slots
 
+# Registry of connected robots by controller IP. The drag-teach teleop shares the
+# robot's single SDK connection (the FR controller allows only one state client), so it
+# looks the robot up here. lerobot-record connects the robot before the teleop.
+_ROBOT_BY_IP: dict[str, "FairinoFR5"] = {}
+
 
 class FairinoFR5(Robot):
     config_class = FairinoFR5Config
@@ -41,6 +46,7 @@ class FairinoFR5(Robot):
         self.cameras = make_cameras_from_configs(config.cameras)
         self._servo_started = False
         self._enabled = False  # whether RobotEnable(1) was issued (set in configure)
+        self._drag_active = False  # whether DragTeachSwitch(1) is engaged
         self._servo_cmd_type = 0  # transport used for ServoMoveStart/End (set in configure)
         self._last_gripper_cmd: int | None = None
         self._ee_reject_count = 0  # consecutive ServoCart rejections
@@ -125,6 +131,7 @@ class FairinoFR5(Robot):
         for cam in self.cameras.values():
             cam.connect()
         self.configure()
+        _ROBOT_BY_IP[self.config.ip] = self  # share connection with the drag-teach teleop
         logger.info("FairinoFR5 connected at %s", self.config.ip)
 
     def _assert_xmlrpc_alive(self) -> None:
@@ -146,6 +153,22 @@ class FairinoFR5(Robot):
         r = self.robot
         _ok(r.RobotEnable(1), "RobotEnable")
         self._enabled = True
+
+        if self.config.drag_teach:
+            # Kinesthetic teaching: enter free-drive, no servo session. send_action() is a
+            # no-op so we don't fight the operator; get_observation() still reads joints.
+            _ok(r.DragTeachSwitch(1), "DragTeachSwitch(on)")
+            self._drag_active = True
+            ret = r.IsInDragTeach()
+            in_drag = ret[1] if isinstance(ret, (list, tuple)) and len(ret) > 1 else None
+            if in_drag != 1:
+                logger.warning(
+                    "drag_teach requested but IsInDragTeach=%s. If the arm isn't free to "
+                    "move by hand, the controller may need manual mode enabled on the pendant.",
+                    in_drag,
+                )
+            return
+
         _ok(r.Mode(0), "Mode(automatic)")  # 0 = automatic mode, required for ServoJ
         if self.config.use_gripper:
             _ok(
@@ -161,6 +184,11 @@ class FairinoFR5(Robot):
     def disconnect(self) -> None:
         if self.robot is not None:
             try:
+                if self._drag_active:
+                    try:
+                        self.robot.DragTeachSwitch(0)
+                    except Exception:  # pragma: no cover - best-effort teardown
+                        logger.exception("DragTeachSwitch(off) failed during disconnect")
                 if self._servo_started:
                     try:
                         # Halt any residual incremental motion before ending the session.
@@ -175,9 +203,11 @@ class FairinoFR5(Robot):
                     except Exception:  # pragma: no cover
                         logger.exception("RobotEnable(0) failed during disconnect")
             finally:
+                _ROBOT_BY_IP.pop(self.config.ip, None)
                 self.robot = None
                 self._servo_started = False
                 self._enabled = False
+                self._drag_active = False
                 self._last_gripper_cmd = None
         for cam in self.cameras.values():
             cam.disconnect()
@@ -212,6 +242,10 @@ class FairinoFR5(Robot):
     def send_action(self, action: RobotAction) -> RobotAction:
         if not self.is_connected:
             raise ConnectionError(f"{self} is not connected.")
+
+        if self.config.drag_teach:
+            # Operator drives the arm by hand in free-drive; do not command motion.
+            return dict(action)
 
         check_safety(self.robot)
 

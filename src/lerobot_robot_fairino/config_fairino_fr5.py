@@ -46,6 +46,11 @@ class FairinoFR5Config(RobotConfig):
     #             -> ServoCart incremental Cartesian. The FR5 controller solves IK onboard
     #             (no URDF/solver needed). Use this for gamepad/Xbox teleoperation.
     action_mode: str = "joint"
+    # Kinesthetic teaching: when True, connect() puts the arm in free-drive
+    # (DragTeachSwitch) instead of a servo session, and send_action() is a no-op so the
+    # driver never fights the operator. Use with --teleop.type=fairino_drag_teleop to
+    # record demos. Joint trajectories are recorded as the action (keys end in .pos).
+    drag_teach: bool = False
     ee_frame: str = "base"             # "base" (ServoCart mode 1) or "tool" (ServoCart mode 2)
     # Conservative defaults for first bring-up: 5 mm/unit => ~150 mm/s at full stick @30Hz,
     # capped at 10 mm/tick (~300 mm/s). Raise once direction/scale are verified on hardware.

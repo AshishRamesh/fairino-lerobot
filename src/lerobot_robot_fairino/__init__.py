@@ -6,8 +6,15 @@ plugin discovery imports this package automatically because its distribution nam
 with ``lerobot_robot_``.
 """
 
+from .config_drag_teleop import FairinoDragTeleopConfig
 from .config_fairino_fr5 import FairinoFR5Config
+from .drag_teleop import FairinoDragTeleop
 from .fairino_fr5 import FairinoFR5
 
-__all__ = ["FairinoFR5", "FairinoFR5Config"]
+__all__ = [
+    "FairinoFR5",
+    "FairinoFR5Config",
+    "FairinoDragTeleop",
+    "FairinoDragTeleopConfig",
+]
 __version__ = "0.1.0"

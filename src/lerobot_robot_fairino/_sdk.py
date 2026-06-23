@@ -107,6 +107,7 @@ class MockRPC:
         self.move_gripper_calls = 0
         self.stop_motion_calls = 0
         self.robot_enable_states = []   # history of RobotEnable() args
+        self.drag_state = 0             # 0 = off, 1 = drag-teach engaged
 
     # connection / mode -----------------------------------------------------------------
     def RobotEnable(self, state):  # noqa: N802 (match SDK casing)
@@ -179,9 +180,10 @@ class MockRPC:
     def GetGripperMotionDone(self):  # noqa: N802
         return 0, [0, 1]
 
-    # drag-teach (used by the future teleop phase) --------------------------------------
+    # drag-teach -------------------------------------------------------------------------
     def DragTeachSwitch(self, state):  # noqa: N802
+        self.drag_state = int(state)
         return 0
 
     def IsInDragTeach(self):  # noqa: N802
-        return 0, 0
+        return 0, self.drag_state

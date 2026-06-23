@@ -120,6 +120,30 @@ controller safety fault aborts the loop; benign singularity/limit rejections are
 after `max_consecutive_servo_errors`). The gamepad's trigger gripper is ignored unless
 `--robot.use_gripper=true`.
 
+## Data collection — drag-teach (kinesthetic)
+
+Record demos by hand-guiding the arm. The robot enters free-drive (`DragTeachSwitch`) and
+suppresses motion; the `fairino_drag_teleop` teleop reads the same arm's live joints (over
+the robot's shared connection) and records them as the action. Recorded action keys are
+`joint1.pos … joint6.pos`, so the dataset trains and rolls out unchanged.
+
+```bash
+lerobot-record \
+  --robot.type=fairino_fr5 --robot.drag_teach=true --robot.ip=192.168.58.2 --robot.fps=30 \
+  --robot.cameras='{ front: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30} }' \
+  --robot.id=fr5_main \
+  --teleop.type=fairino_drag_teleop --teleop.ip=192.168.58.2 \
+  --dataset.repo_id=$HF_USER/fr5_pick --dataset.num_episodes=10 \
+  --dataset.single_task="Pick up the cube" --dataset.fps=30 \
+  --display_data=true
+```
+
+Notes:
+- `--robot.drag_teach=true` and `--teleop.ip` **must equal** `--robot.ip` (one shared connection).
+- Keep `--robot.action_mode=joint` (the default) — drag-teach records joint trajectories.
+- If the arm isn't free to move by hand, enable manual/drag mode on the teach pendant.
+- For **rollout**, drop `--robot.drag_teach` (default `false`) so the policy drives via `ServoJ`.
+
 ## Inference (after you have a trained policy)
 
 ```bash
@@ -168,11 +192,11 @@ normalizes at training time from dataset statistics; the driver never normalizes
 
 ## Roadmap (deferred)
 
-1. `lerobot_teleoperator_fairino` — drag-teach (`DragTeachSwitch`) teleop so `lerobot-record`
-   can collect demos kinesthetically on the single arm. (Gamepad EE-delta teleop is already
-   supported — see above — but is translation-only, 3-DoF.)
-2. Gripper bring-up once the model is known (`SetGripperConfig` company/device/type).
-3. Camera wiring (OpenCV / RealSense) for the actual rig.
-4. Full 6-DoF gamepad control (map the right stick to `drx/dry/drz` rotation increments).
+1. Gripper bring-up once the model is known (`SetGripperConfig` company/device/type).
+2. Camera wiring (OpenCV / RealSense) for the actual rig.
+3. Full 6-DoF gamepad control (map the right stick to `drx/dry/drz` rotation increments).
+
+Already supported: joint + EE-delta (gamepad) control, and **drag-teach recording**
+(`--robot.drag_teach=true` + `--teleop.type=fairino_drag_teleop`).
 
 Then the full loop is: record → `lerobot-train --policy.type=act|smolvla` → `lerobot-rollout`.

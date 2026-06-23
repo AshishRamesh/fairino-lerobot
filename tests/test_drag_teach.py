@@ -34,6 +34,28 @@ def test_drag_mode_enters_freedrive_no_servo():
         r.disconnect()
 
 
+def test_drag_mode_switches_to_manual():
+    r = _drag_robot("10.0.0.10")
+    try:
+        assert 1 in r.robot.mode_states   # Mode(1) = manual issued for free-drive
+    finally:
+        r.disconnect()
+
+
+def test_drag_entry_failure_gives_clear_error(monkeypatch):
+    # Simulate the controller refusing free-drive (e.g. still in automatic mode).
+    from lerobot_robot_fairino import _sdk
+
+    monkeypatch.setattr(
+        _sdk.MockRPC, "DragTeachSwitch",
+        lambda self, state: -1 if int(state) == 1 else 0,
+    )
+    r = FairinoFR5(FairinoFR5Config(mock=True, drag_teach=True, ip="10.0.0.11"))
+    with pytest.raises(RuntimeError, match="MANUAL"):
+        r.connect()
+    assert "10.0.0.11" not in _ROBOT_BY_IP   # failed connect must not leave it registered
+
+
 def test_drag_mode_send_action_is_noop():
     r = _drag_robot("10.0.0.2")
     try:

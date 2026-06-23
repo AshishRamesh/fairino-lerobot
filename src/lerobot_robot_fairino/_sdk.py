@@ -107,7 +107,9 @@ class MockRPC:
         self.move_gripper_calls = 0
         self.stop_motion_calls = 0
         self.robot_enable_states = []   # history of RobotEnable() args
+        self.mode_states = []           # history of Mode() args
         self.drag_state = 0             # 0 = off, 1 = drag-teach engaged
+        self.drag_switch_return_code = 0  # set non-zero to simulate a refused DragTeachSwitch(1)
 
     # connection / mode -----------------------------------------------------------------
     def RobotEnable(self, state):  # noqa: N802 (match SDK casing)
@@ -115,6 +117,7 @@ class MockRPC:
         return 0
 
     def Mode(self, state):  # noqa: N802
+        self.mode_states.append(int(state))
         return 0
 
     def ServoMoveStart(self, cmdType=0):  # noqa: N802, N803
@@ -182,6 +185,8 @@ class MockRPC:
 
     # drag-teach -------------------------------------------------------------------------
     def DragTeachSwitch(self, state):  # noqa: N802
+        if int(state) == 1 and self.drag_switch_return_code != 0:
+            return self.drag_switch_return_code  # refused (e.g. controller in auto mode)
         self.drag_state = int(state)
         return 0
 

@@ -122,15 +122,21 @@ class FairinoFR5(Robot):
             return
         rpc_cls = self._make_rpc_cls()
         self.robot = rpc_cls(self.config.ip)  # opens XML-RPC (+ UDP state thread)
-        if not self.config.mock and not self.config.require_cnde:
-            # The SDK gates every call behind ``is_connect``, which requires the CNDE
-            # real-time-state stream (port 20005). This driver reads over XML-RPC and
-            # does not use CNDE, so open the gate and verify XML-RPC actually responds.
-            type(self.robot).is_connect = True
-            self._assert_xmlrpc_alive()
-        for cam in self.cameras.values():
-            cam.connect()
-        self.configure()
+        try:
+            if not self.config.mock and not self.config.require_cnde:
+                # The SDK gates every call behind ``is_connect``, which requires the CNDE
+                # real-time-state stream (port 20005). This driver reads over XML-RPC and
+                # does not use CNDE, so open the gate and verify XML-RPC actually responds.
+                type(self.robot).is_connect = True
+                self._assert_xmlrpc_alive()
+            for cam in self.cameras.values():
+                cam.connect()
+            self.configure()
+        except Exception:
+            # Clean up a partial connect (e.g. drag-teach refused) so the arm doesn't stay
+            # enabled and teardown happens while the connection is still alive.
+            self.disconnect()
+            raise
         _ROBOT_BY_IP[self.config.ip] = self  # share connection with the drag-teach teleop
         logger.info("FairinoFR5 connected at %s", self.config.ip)
 
@@ -157,16 +163,28 @@ class FairinoFR5(Robot):
         if self.config.drag_teach:
             # Kinesthetic teaching: enter free-drive, no servo session. send_action() is a
             # no-op so we don't fight the operator; get_observation() still reads joints.
-            _ok(r.DragTeachSwitch(1), "DragTeachSwitch(on)")
+            # Free-drive requires MANUAL mode — switch to it (best-effort: on some setups
+            # the auto/manual toggle is controlled from the pendant).
+            mode_code = r.Mode(1)
+            mode_code = mode_code[0] if isinstance(mode_code, (list, tuple)) else mode_code
+            if int(mode_code) != 0:
+                logger.warning(
+                    "Mode(manual) returned %s; if drag-teach fails, switch to manual mode "
+                    "on the teach pendant.", mode_code,
+                )
+            drag_code = r.DragTeachSwitch(1)
+            drag_code = drag_code[0] if isinstance(drag_code, (list, tuple)) else drag_code
+            if int(drag_code) != 0:
+                raise RuntimeError(
+                    f"Failed to enter drag-teach (DragTeachSwitch returned {drag_code}). The "
+                    f"FR5 must be in MANUAL mode with no program running for free-drive — set "
+                    f"manual mode on the teach pendant and clear any fault, then retry."
+                )
             self._drag_active = True
             ret = r.IsInDragTeach()
             in_drag = ret[1] if isinstance(ret, (list, tuple)) and len(ret) > 1 else None
             if in_drag != 1:
-                logger.warning(
-                    "drag_teach requested but IsInDragTeach=%s. If the arm isn't free to "
-                    "move by hand, the controller may need manual mode enabled on the pendant.",
-                    in_drag,
-                )
+                logger.warning("DragTeachSwitch(1) succeeded but IsInDragTeach=%s.", in_drag)
             return
 
         _ok(r.Mode(0), "Mode(automatic)")  # 0 = automatic mode, required for ServoJ
